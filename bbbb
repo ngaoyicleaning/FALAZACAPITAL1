@@ -1,0 +1,807 @@
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+    getAuth, 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithPopup
+} from 'firebase/auth';
+import { 
+    getFirestore, 
+    doc, 
+    setDoc, 
+    onSnapshot,
+    collection,
+    addDoc,
+    query,
+} from 'firebase/firestore';
+import { ArrowRight, Lock, User, Mail, Briefcase, FileText, DollarSign, LogOut, CheckCircle, Clock, XCircle, ShieldCheck } from 'lucide-react';
+
+// --- Firebase Configuration ---
+// IMPORTANT: This configuration is provided by the environment.
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+    ? JSON.parse(__firebase_config) 
+    : { apiKey: "...", authDomain: "...", projectId: "...", storageBucket: "...", messagingSenderId: "...", appId: "..." };
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// --- App ID Configuration ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-financial-app';
+
+// --- Main App Component ---
+export default function App() {
+    const [page, setPage] = useState('home');
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setLoading(false);
+            if (currentUser) {
+                setPage('dashboard');
+            } else {
+                setPage('home');
+            }
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const navigate = (newPage) => {
+        if (newPage === 'dashboard' && !user) {
+            setPage('login');
+        } else {
+            setPage(newPage);
+        }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await signOut(auth);
+            setPage('home');
+        } catch (error) {
+            console.error("Error signing out: ", error);
+        }
+    };
+
+    if (loading) {
+        return <div className="bg-black text-white min-h-screen flex items-center justify-center">Loading...</div>;
+    }
+
+    return (
+        <div className="bg-white font-sans text-gray-800">
+            <Navbar user={user} navigate={navigate} handleSignOut={handleSignOut} />
+            <main className="pt-20">
+                {page === 'home' && <HomePage navigate={navigate} />}
+                {page === 'services' && <ServicesPage />}
+                {page === 'about' && <AboutPage />}
+                {page === 'contact' && <ContactPage />}
+                {page === 'login' && <AuthPage setPage={setPage} />}
+                {page === 'dashboard' && user && <DashboardPage user={user} />}
+            </main>
+            <Footer />
+        </div>
+    );
+}
+
+// --- Navigation Component ---
+const Navbar = ({ user, navigate, handleSignOut }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    const navLinks = [
+        { name: 'Home', page: 'home' },
+        { name: 'Services', page: 'services' },
+        { name: 'About Us', page: 'about' },
+        { name: 'Contact', page: 'contact' },
+    ];
+
+    return (
+        <nav className="bg-white shadow-md fixed w-full z-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex items-center justify-between h-20">
+                    <div className="flex-shrink-0">
+                        <span className="text-2xl font-bold text-black cursor-pointer" onClick={() => navigate('home')}>
+                           Sandton<span className="text-gray-500">Wealth</span>
+                        </span>
+                    </div>
+                    <div className="hidden md:block">
+                        <div className="ml-10 flex items-baseline space-x-4">
+                            {navLinks.map(link => (
+                                <a key={link.name} onClick={() => navigate(link.page)} className="text-gray-600 hover:bg-gray-800 hover:text-white px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors duration-300">{link.name}</a>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="hidden md:block">
+                        {user ? (
+                            <div className="flex items-center space-x-4">
+                                <button onClick={() => navigate('dashboard')} className="bg-black text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors duration-300">Dashboard</button>
+                                <button onClick={handleSignOut} className="bg-gray-200 text-black px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-300 transition-colors duration-300 flex items-center">
+                                    <LogOut className="w-4 h-4 mr-2" /> Sign Out
+                                </button>
+                            </div>
+                        ) : (
+                            <button onClick={() => navigate('login')} className="bg-black text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors duration-300">
+                                Client Login
+                            </button>
+                        )}
+                    </div>
+                    <div className="-mr-2 flex md:hidden">
+                        <button onClick={() => setIsOpen(!isOpen)} type="button" className="bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                            <span className="sr-only">Open main menu</span>
+                            {isOpen ? <XCircle className="block h-6 w-6" /> : <svg className="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {isOpen && (
+                <div className="md:hidden">
+                    <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                        {navLinks.map(link => (
+                           <a key={link.name} onClick={() => { navigate(link.page); setIsOpen(false); }} className="text-gray-600 hover:bg-gray-800 hover:text-white block px-3 py-2 rounded-md text-base font-medium cursor-pointer">{link.name}</a>
+                        ))}
+                    </div>
+                     <div className="pt-4 pb-3 border-t border-gray-700">
+                        {user ? (
+                            <div className="px-2 space-y-2">
+                                <button onClick={() => { navigate('dashboard'); setIsOpen(false); }} className="w-full text-left bg-black text-white block px-3 py-2 rounded-md text-base font-medium">Dashboard</button>
+                                <button onClick={() => { handleSignOut(); setIsOpen(false); }} className="w-full text-left bg-gray-200 text-black block px-3 py-2 rounded-md text-base font-medium">Sign Out</button>
+                            </div>
+                        ) : (
+                            <div className="px-2">
+                                <button onClick={() => { navigate('login'); setIsOpen(false); }} className="w-full text-left bg-black text-white block px-3 py-2 rounded-md text-base font-medium">Client Login</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </nav>
+    );
+};
+
+// --- Page Components ---
+const HomePage = ({ navigate }) => (
+    <div className="relative">
+        <section className="bg-black text-white">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32 text-center">
+                <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight leading-tight">
+                    Precision Financial Strategy. <span className="text-gray-400">Secure Tax Solutions.</span>
+                </h1>
+                <p className="mt-6 max-w-3xl mx-auto text-lg md:text-xl text-gray-300">
+                    From intricate tax filings to strategic wealth management, we offer secure, confidential expertise to help you achieve your financial ambitions.
+                </p>
+                <div className="mt-8 flex justify-center gap-4 flex-wrap">
+                    <button onClick={() => navigate('services')} className="bg-white text-black font-bold py-3 px-8 rounded-lg text-lg hover:bg-gray-200 transition-transform transform hover:scale-105">
+                        Our Services
+                    </button>
+                    <button onClick={() => navigate('login')} className="bg-gray-800 text-white font-bold py-3 px-8 rounded-lg text-lg hover:bg-gray-700 transition-transform transform hover:scale-105">
+                        Secure Client Portal <ArrowRight className="inline ml-2 w-5 h-5" />
+                    </button>
+                </div>
+            </div>
+        </section>
+        <SecuritySection />
+        <ServicesPreview />
+        <Testimonials />
+    </div>
+);
+
+const SecuritySection = () => (
+    <section className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="lg:text-center">
+                <h2 className="text-base text-gray-600 font-semibold tracking-wide uppercase">Your Security is Our Priority</h2>
+                <p className="mt-2 text-3xl leading-8 font-extrabold tracking-tight text-black sm:text-4xl">
+                    A Fortress for Your Financial Data
+                </p>
+                <p className="mt-4 max-w-2xl text-xl text-gray-500 lg:mx-auto">
+                    We employ state-of-the-art security protocols to ensure your sensitive information is always protected.
+                </p>
+            </div>
+            <div className="mt-12 grid gap-8 md:grid-cols-3">
+                <div className="flex flex-col items-center text-center">
+                    <div className="flex items-center justify-center h-16 w-16 rounded-full bg-gray-200 mb-4">
+                        <ShieldCheck className="w-8 h-8 text-black"/>
+                    </div>
+                    <h3 className="text-xl font-bold text-black">End-to-End Encryption</h3>
+                    <p className="mt-2 text-gray-600">All data transmitted to and from our client portal is encrypted, ensuring it remains private and secure.</p>
+                </div>
+                <div className="flex flex-col items-center text-center">
+                    <div className="flex items-center justify-center h-16 w-16 rounded-full bg-gray-200 mb-4">
+                        <Lock className="w-8 h-8 text-black"/>
+                    </div>
+                    <h3 className="text-xl font-bold text-black">Secure Authentication</h3>
+                    <p className="mt-2 text-gray-600">Robust login systems protect your account from unauthorized access, giving you peace of mind.</p>
+                </div>
+                <div className="flex flex-col items-center text-center">
+                    <div className="flex items-center justify-center h-16 w-16 rounded-full bg-gray-200 mb-4">
+                        <FileText className="w-8 h-8 text-black"/>
+                    </div>
+                    <h3 className="text-xl font-bold text-black">Confidential Handling</h3>
+                    <p className="mt-2 text-gray-600">Our internal policies ensure that your financial data is handled with the utmost confidentiality and professionalism.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+);
+
+
+const ServicesPreview = () => {
+    const services = [
+        { icon: <FileText className="w-12 h-12 text-black"/>, title: "Tax Filing & Preparation", description: "Maximize your returns and minimize your stress with our expert tax preparation services for individuals and businesses." },
+        { icon: <Briefcase className="w-12 h-12 text-black"/>, title: "Financial Consulting", description: "Get personalized financial advice to help you grow your wealth, plan for retirement, and secure your future." },
+        { icon: <DollarSign className="w-12 h-12 text-black"/>, title: "Bookkeeping & Payroll", description: "Streamline your business operations with our efficient and accurate bookkeeping and payroll services." },
+    ];
+    return (
+        <section className="py-20 bg-white">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="text-center">
+                    <h2 className="text-3xl font-extrabold text-black">Comprehensive Financial Services</h2>
+                    <p className="mt-4 text-lg text-gray-600">We handle the numbers, so you can focus on what matters.</p>
+                </div>
+                <div className="mt-12 grid gap-8 md:grid-cols-3">
+                    {services.map(service => (
+                        <div key={service.title} className="bg-gray-100 p-8 rounded-xl shadow-lg hover:shadow-2xl transition-shadow duration-300">
+                           <div className="flex items-center justify-center h-16 w-16 rounded-full bg-gray-200 mb-6">
+                                {service.icon}
+                            </div>
+                            <h3 className="text-xl font-bold text-black">{service.title}</h3>
+                            <p className="mt-4 text-gray-600">{service.description}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+};
+
+const Testimonials = () => {
+     const testimonials = [
+        { name: "Johan V., Sandton", quote: "Sandton Wealth transformed how I approach my business taxes. Their team is knowledgeable, responsive, and truly cares about my success. I couldn't be happier!" },
+        { name: "Lerato M., Johannesburg", quote: "As someone new to investing, their financial consulting was a game-changer. They explained everything clearly and helped me build a solid plan for the future." },
+    ];
+    return (
+        <section className="bg-gray-100 py-20">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                 <h2 className="text-3xl font-extrabold text-black">Trusted by Clients Across South Africa</h2>
+                 <div className="mt-10 space-y-8">
+                    {testimonials.map(t => (
+                        <blockquote key={t.name} className="bg-white p-8 rounded-xl shadow-lg">
+                            <p className="text-lg text-gray-700">"{t.quote}"</p>
+                            <footer className="mt-6">
+                                <p className="font-bold text-black">- {t.name}</p>
+                            </footer>
+                        </blockquote>
+                    ))}
+                 </div>
+            </div>
+        </section>
+    );
+}
+
+const ServicesPage = () => (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+        <h1 className="text-4xl font-extrabold text-center text-black mb-12">Our Services</h1>
+        <div className="space-y-12">
+            <div className="p-8 bg-gray-50 rounded-lg shadow-md">
+                <h2 className="text-2xl font-bold text-gray-800">Tax Consulting & Filing</h2>
+                <p className="mt-4 text-gray-600">Navigating the complexities of SARS can be daunting. Our seasoned tax professionals are here to ensure you are compliant and that you take advantage of every possible deduction. We offer services for personal income tax, corporate tax, and VAT.</p>
+            </div>
+            <div className="p-8 bg-gray-50 rounded-lg shadow-md">
+                <h2 className="text-2xl font-bold text-gray-800">Financial Advisory</h2>
+                <p className="mt-4 text-gray-600">Whether you're planning for retirement, saving for a major purchase, or looking to invest, our financial advisors provide tailored strategies to help you reach your goals. We believe in building long-term relationships based on trust and transparent advice.</p>
+            </div>
+             <div className="p-8 bg-gray-50 rounded-lg shadow-md">
+                <h2 className="text-2xl font-bold text-gray-800">Business Accounting</h2>
+                <p className="mt-4 text-gray-600">Keep your business finances in perfect order with our comprehensive accounting services. From bookkeeping to financial statement preparation, we provide the insights you need to make informed business decisions.</p>
+            </div>
+        </div>
+    </div>
+);
+
+const AboutPage = () => (
+    <div className="bg-white py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="lg:text-center">
+                <h2 className="text-base text-gray-600 font-semibold tracking-wide uppercase">About Us</h2>
+                <p className="mt-2 text-3xl leading-8 font-extrabold tracking-tight text-black sm:text-4xl">
+                    Your Partner in Financial Clarity
+                </p>
+                <p className="mt-4 max-w-2xl text-xl text-gray-500 lg:mx-auto">
+                    Based in the heart of Sandton, Sandton Wealth was founded with a simple mission: to demystify finance and taxes for individuals and businesses in South Africa. We combine modern technology with time-tested financial principles to deliver exceptional service.
+                </p>
+            </div>
+            <div className="mt-10">
+                <p className="text-lg text-gray-700 leading-8">Our team is composed of certified accountants and financial advisors with years of experience in the industry. We are committed to upholding the highest standards of integrity and professionalism. We understand that every client's situation is unique, which is why we take a personalized approach to every case. Your financial well-being is our top priority.</p>
+            </div>
+        </div>
+    </div>
+);
+
+const ContactPage = () => {
+    const [submitted, setSubmitted] = useState(false);
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setSubmitted(true);
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
+            <h1 className="text-4xl font-extrabold text-center text-black mb-4">Get in Touch</h1>
+            <p className="text-center text-lg text-gray-600 mb-12">We're here to help. Send us a message and we'll get back to you shortly.</p>
+            {submitted ? (
+                <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 rounded-md" role="alert">
+                    <p className="font-bold">Thank you!</p>
+                    <p>Your message has been sent. We will contact you soon.</p>
+                </div>
+            ) : (
+                <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-lg space-y-6 border border-gray-200">
+                    <div>
+                        <label htmlFor="name" className="block text-sm font-medium text-gray-700">Full Name</label>
+                        <input type="text" name="name" id="name" required className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"/>
+                    </div>
+                    <div>
+                        <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email Address</label>
+                        <input type="email" name="email" id="email" required className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"/>
+                    </div>
+                    <div>
+                        <label htmlFor="message" className="block text-sm font-medium text-gray-700">Message</label>
+                        <textarea name="message" id="message" rows="4" required className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"></textarea>
+                    </div>
+                    <div>
+                        <button type="submit" className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black">
+                            Send Message
+                        </button>
+                    </div>
+                </form>
+            )}
+        </div>
+    );
+};
+
+// --- Authentication Component ---
+const AuthPage = ({ setPage }) => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleAuthAction = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+        try {
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                await createUserWithEmailAndPassword(auth, email, password);
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGoogleSignIn = async () => {
+        setError('');
+        setLoading(true);
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
+                <div>
+                    <h2 className="mt-6 text-center text-3xl font-extrabold text-black">
+                        {isLogin ? 'Sign in to your Client Portal' : 'Create your Client Account'}
+                    </h2>
+                </div>
+                <form className="mt-8 space-y-6" onSubmit={handleAuthAction}>
+                    <div className="rounded-md shadow-sm -space-y-px">
+                        <div className="relative">
+                            <Mail className="absolute top-3 left-3 w-5 h-5 text-gray-400" />
+                            <input id="email-address" name="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="appearance-none rounded-none relative block w-full px-3 py-2 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-black focus:border-black focus:z-10 sm:text-sm" placeholder="Email address" />
+                        </div>
+                        <div className="relative">
+                            <Lock className="absolute top-3 left-3 w-5 h-5 text-gray-400" />
+                            <input id="password" name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="appearance-none rounded-none relative block w-full px-3 py-2 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-black focus:border-black focus:z-10 sm:text-sm" placeholder="Password" />
+                        </div>
+                    </div>
+                    {error && <p className="text-sm text-red-600">{error}</p>}
+                    <div>
+                        <button type="submit" disabled={loading} className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:bg-gray-400">
+                            {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Sign Up')}
+                        </button>
+                    </div>
+                </form>
+                <div className="relative flex py-2 items-center">
+                    <div className="flex-grow border-t border-gray-300"></div>
+                    <span className="flex-shrink mx-4 text-gray-400">Or</span>
+                    <div className="flex-grow border-t border-gray-300"></div>
+                </div>
+                <div>
+                    <button onClick={handleGoogleSignIn} disabled={loading} className="group relative w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:bg-gray-200">
+                        <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48px" height="48px"><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l6.19,5.238C42.021,35.596,44,30.138,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path></svg>
+                        Sign in with Google
+                    </button>
+                </div>
+                <p className="mt-2 text-center text-sm text-gray-600">
+                    {isLogin ? "Don't have an account?" : 'Already have an account?'}
+                    <a href="#" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(''); }} className="font-medium text-gray-600 hover:text-black ml-1">
+                        {isLogin ? 'Sign Up' : 'Sign In'}
+                    </a>
+                </p>
+            </div>
+        </div>
+    );
+};
+
+// --- Dashboard Component ---
+const DashboardPage = ({ user }) => {
+    const [clientData, setClientData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [view, setView] = useState('overview'); // overview, newCase, payment
+
+    useEffect(() => {
+        const dataCollectionRef = collection(db, `artifacts/${appId}/users/${user.uid}/financialData`);
+        const q = query(dataCollectionRef);
+
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            if (!querySnapshot.empty) {
+                const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setClientData(data[0]); 
+            } else {
+                setClientData(null);
+            }
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching client data:", error);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [user.uid]);
+
+    return (
+        <div className="bg-gray-100 min-h-screen">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+                <header className="mb-8">
+                    <h1 className="text-3xl font-bold text-black">Client Dashboard</h1>
+                    <p className="text-gray-600">Welcome, {user.displayName || user.email}</p>
+                </header>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                    <aside className="lg:col-span-1">
+                        <div className="bg-white rounded-lg shadow p-4">
+                            <nav className="space-y-1">
+                                <button onClick={() => setView('overview')} className={`w-full text-left flex items-center px-3 py-2 text-sm font-medium rounded-md ${view === 'overview' ? 'bg-gray-200 text-black' : 'text-gray-600 hover:bg-gray-100'}`}>
+                                    <Briefcase className="mr-3 h-5 w-5" />
+                                    Case Overview
+                                </button>
+                                <button onClick={() => setView('newCase')} className={`w-full text-left flex items-center px-3 py-2 text-sm font-medium rounded-md ${view === 'newCase' ? 'bg-gray-200 text-black' : 'text-gray-600 hover:bg-gray-100'}`}>
+                                    <FileText className="mr-3 h-5 w-5" />
+                                    Submit New Case
+                                </button>
+                                <button onClick={() => setView('payment')} disabled={!clientData || clientData.paymentStatus === 'Paid'} className={`w-full text-left flex items-center px-3 py-2 text-sm font-medium rounded-md ${view === 'payment' ? 'bg-gray-200 text-black' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+                                    <DollarSign className="mr-3 h-5 w-5" />
+                                    Make Payment
+                                </button>
+                            </nav>
+                        </div>
+                    </aside>
+
+                    <main className="lg:col-span-3">
+                       <div className="bg-white rounded-lg shadow p-6 min-h-[400px]">
+                            {loading && <p>Loading your data...</p>}
+                            {!loading && view === 'overview' && <CaseOverview data={clientData} />}
+                            {!loading && view === 'newCase' && <NewCaseForm user={user} setView={setView} existingData={clientData} />}
+                            {!loading && view === 'payment' && <PaymentSection data={clientData} user={user} setView={setView} />}
+                       </div>
+                    </main>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const CaseOverview = ({ data }) => {
+    if (!data) {
+        return (
+            <div>
+                <h2 className="text-2xl font-bold text-black mb-4">Welcome!</h2>
+                <p className="text-gray-600">You do not have any active cases with us yet. Please submit a new case to get started.</p>
+            </div>
+        );
+    }
+    
+    const getStatusChip = (status) => {
+        switch (status) {
+            case 'Submitted': return <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-800"><Clock className="w-4 h-4 mr-1.5"/>{status}</span>;
+            case 'In Progress': return <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800"><Clock className="w-4 h-4 mr-1.5"/>{status}</span>;
+            case 'Completed': return <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800"><CheckCircle className="w-4 h-4 mr-1.5"/>{status}</span>;
+            default: return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-gray-100 text-gray-800">{status}</span>;
+        }
+    }
+    
+    const getPaymentChip = (status) => {
+        switch (status) {
+            case 'Paid': return <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800"><CheckCircle className="w-4 h-4 mr-1.5"/>{status}</span>;
+            case 'Unpaid': return <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800"><XCircle className="w-4 h-4 mr-1.5"/>{status}</span>;
+            default: return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-gray-100 text-gray-800">{status}</span>;
+        }
+    }
+
+    return (
+        <div>
+            <h2 className="text-2xl font-bold text-black mb-6">Your Case Details</h2>
+            <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-500">Service Type:</span>
+                    <span className="font-semibold text-gray-800">{data.serviceType}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-500">Case Status:</span>
+                    {getStatusChip(data.status)}
+                </div>
+                <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-500">Payment Status:</span>
+                    {getPaymentChip(data.paymentStatus)}
+                </div>
+                 <div className="pt-4 border-t">
+                    <span className="font-medium text-gray-500 block mb-2">Your Query/Message:</span>
+                    <p className="text-gray-700 bg-gray-50 p-4 rounded-md">{data.query}</p>
+                </div>
+                {data.status === 'Completed' && (
+                    <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                        <h3 className="font-bold text-black">Case Completed</h3>
+                        <p className="text-gray-800 mt-2">Our work on your {data.serviceType} case is complete. You can find any relevant documents attached to your secure portal (feature coming soon). Please contact us if you have any questions.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const NewCaseForm = ({ user, setView, existingData }) => {
+    const [serviceType, setServiceType] = useState('Tax Filing');
+    const [query, setQuery] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!query) {
+            setError('Please provide details about your query.');
+            return;
+        }
+        setError('');
+        setSuccess('');
+        setLoading(true);
+
+        const caseData = {
+            serviceType,
+            query,
+            status: 'Submitted',
+            paymentStatus: 'Unpaid',
+            submittedAt: new Date().toISOString(),
+            userId: user.uid,
+        };
+
+        try {
+            const docRefPath = `artifacts/${appId}/users/${user.uid}/financialData`;
+            if (existingData) {
+                await setDoc(doc(db, docRefPath, existingData.id), caseData);
+            } else {
+                await addDoc(collection(db, docRefPath), caseData);
+            }
+            
+            setSuccess('Your case has been submitted successfully! We will review it shortly.');
+            setQuery('');
+            setTimeout(() => setView('overview'), 2000);
+        } catch (err) {
+            setError('Failed to submit case. Please try again.');
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+    
+    if (existingData && existingData.status !== 'Completed') {
+        return (
+            <div className="text-center p-8">
+                <h2 className="text-2xl font-bold text-black mb-4">Active Case Found</h2>
+                <p className="text-gray-600 mb-6">You already have an active case for <span className="font-bold">{existingData.serviceType}</span>. Please wait for it to be completed before submitting a new one.</p>
+                <button onClick={() => setView('overview')} className="bg-black text-white font-bold py-2 px-6 rounded-lg hover:bg-gray-800">
+                    View Case Overview
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-6">
+            <h2 className="text-2xl font-bold text-black">Submit Your Financial Case</h2>
+            <p className="text-gray-600">Please provide the details below. Our team will securely access this information to begin working on your case.</p>
+            
+            <div>
+                <label htmlFor="serviceType" className="block text-sm font-medium text-gray-700">Select Service</label>
+                <select id="serviceType" value={serviceType} onChange={e => setServiceType(e.target.value)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-black focus:border-black sm:text-sm rounded-md">
+                    <option>Tax Filing</option>
+                    <option>Financial Consulting</option>
+                    <option>Bookkeeping</option>
+                </select>
+            </div>
+
+            <div>
+                <label htmlFor="query" className="block text-sm font-medium text-gray-700">Your Query & Information</label>
+                <textarea id="query" value={query} onChange={e => setQuery(e.target.value)} rows="6" className="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md focus:ring-black focus:border-black" placeholder="Please describe your needs. E.g., 'I need help filing my personal income tax for 2024. I have income from employment and a small side business.'"></textarea>
+                <p className="mt-2 text-sm text-gray-500">For your security, do not include passwords or full bank account numbers here. This portal is encrypted, but we will contact you via a secure channel if more sensitive information is required.</p>
+            </div>
+
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Upload Documents (Optional)</label>
+                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                    <div className="space-y-1 text-center">
+                        <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        <div className="flex text-sm text-gray-600">
+                            <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-gray-800 hover:text-black focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-black">
+                                <span>Upload a file</span>
+                                <input id="file-upload" name="file-upload" type="file" className="sr-only" disabled/>
+                            </label>
+                            <p className="pl-1">or drag and drop</p>
+                        </div>
+                        <p className="text-xs text-gray-500">PNG, JPG, PDF up to 10MB (Feature coming soon)</p>
+                    </div>
+                </div>
+            </div>
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            {success && <p className="text-sm text-green-600">{success}</p>}
+
+            <div>
+                <button type="submit" disabled={loading} className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50">
+                    {loading ? 'Submitting...' : 'Submit Case Securely'}
+                </button>
+            </div>
+        </form>
+    );
+};
+
+const PaymentSection = ({ data, user, setView }) => {
+    const [processing, setProcessing] = useState(false);
+    const [paymentSuccess, setPaymentSuccess] = useState(false);
+    
+    if (!data || data.paymentStatus === 'Paid') {
+        return (
+            <div className="text-center p-8">
+                <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
+                <h2 className="mt-4 text-2xl font-bold text-black">All Paid Up!</h2>
+                <p className="text-gray-600 mt-2">There are no outstanding payments on your account. Thank you!</p>
+            </div>
+        );
+    }
+    
+    const handlePayment = async () => {
+        setProcessing(true);
+        try {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const docRef = doc(db, `artifacts/${appId}/users/${user.uid}/financialData`, data.id);
+            await setDoc(docRef, { paymentStatus: 'Paid' }, { merge: true });
+            setPaymentSuccess(true);
+            setTimeout(() => setView('overview'), 2500);
+        } catch (error) {
+            console.error("Payment simulation failed: ", error);
+        } finally {
+            setProcessing(false);
+        }
+    };
+    
+    if (paymentSuccess) {
+        return (
+             <div className="text-center p-8">
+                <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
+                <h2 className="mt-4 text-2xl font-bold text-black">Payment Successful!</h2>
+                <p className="text-gray-600 mt-2">Thank you for your payment. Your records have been updated.</p>
+            </div>
+        )
+    }
+
+    return (
+        <div className="max-w-lg mx-auto">
+            <h2 className="text-2xl font-bold text-black mb-2">Make a Payment</h2>
+            <p className="text-gray-600 mb-6">Complete the payment for your requested service.</p>
+            
+            <div className="bg-gray-100 p-6 rounded-lg mb-6">
+                <div className="flex justify-between items-center">
+                    <span className="text-lg font-medium text-black">Service: {data.serviceType}</span>
+                    <span className="text-2xl font-bold text-black">R2,500.00</span>
+                </div>
+                <p className="text-sm text-gray-700 mt-2">This is a fixed fee for the selected service. Invoice #INV-2024-001</p>
+            </div>
+            
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Card Number</label>
+                    <input type="text" placeholder="**** **** **** 1234" className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Expiry Date</label>
+                        <input type="text" placeholder="MM / YY" className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black" />
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium text-gray-700">CVC</label>
+                        <input type="text" placeholder="***" className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black" />
+                    </div>
+                </div>
+            </div>
+            
+            <div className="mt-8">
+                <button onClick={handlePayment} disabled={processing} className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50">
+                    {processing ? 'Processing Payment...' : 'Pay R2,500.00 Securely'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- Footer Component ---
+const Footer = () => (
+    <footer className="bg-black text-white">
+        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+            <div className="xl:grid xl:grid-cols-3 xl:gap-8">
+                <div className="space-y-8 xl:col-span-1">
+                    <span className="text-3xl font-bold">Sandton<span className="text-gray-400">Wealth</span></span>
+                    <p className="text-gray-300 text-base">Your trusted partner in financial clarity and tax solutions.</p>
+                </div>
+                <div className="mt-12 grid grid-cols-2 gap-8 xl:mt-0 xl:col-span-2">
+                    <div className="md:grid md:grid-cols-2 md:gap-8">
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-400 tracking-wider uppercase">Solutions</h3>
+                            <ul className="mt-4 space-y-4">
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Tax Filing</a></li>
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Consulting</a></li>
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Bookkeeping</a></li>
+                            </ul>
+                        </div>
+                        <div className="mt-12 md:mt-0">
+                            <h3 className="text-sm font-semibold text-gray-400 tracking-wider uppercase">Company</h3>
+                            <ul className="mt-4 space-y-4">
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">About</a></li>
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Careers</a></li>
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Contact</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div className="md:grid md:grid-cols-1 md:gap-8">
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-400 tracking-wider uppercase">Legal</h3>
+                            <ul className="mt-4 space-y-4">
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Privacy</a></li>
+                                <li><a href="#" className="text-base text-gray-300 hover:text-white">Terms</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div className="mt-12 border-t border-gray-800 pt-8">
+                <p className="text-base text-gray-400 text-center">&copy; 2024 Sandton Wealth. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+);
